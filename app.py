@@ -5,7 +5,12 @@ from datetime import datetime
 import spacy  # For Named Entity Recognition (NER)
 
 # Load spaCy's English model for NER
-nlp = spacy.load("en_core_web_sm")
+try:
+    nlp = spacy.load("en_core_web_sm")
+except OSError:
+    st.warning("Downloading 'en_core_web_sm' model... This may take a few minutes.")
+    spacy.cli.download("en_core_web_sm")
+    nlp = spacy.load("en_core_web_sm")
 
 # Updated section labels, including Medications
 SECTION_LABELS = [
