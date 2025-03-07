@@ -1,165 +1,99 @@
 import re
-import json
 import streamlit as st
-from io import BytesIO
-from fpdf import FPDF
-from collections import OrderedDict
 
+# Pre-defined section labels for the ED note
+SECTION_LABELS = [
+    "Chief Complaint", "HPI", "ROS", "ED Vitals", "Physical Exam",
+    "Labs & Imaging", "MDM", "Prior to Admission", "Uncategorized"
+]
+
+# Title of the Streamlit app
 st.title("ED Note Formatter")
-raw_text = st.text_area("Paste your raw ED data here:")
-uploaded_file = st.file_uploader("Upload an abbreviation JSON file (optional)", type=["json"])
 
-# Ordered section patterns to maintain processing sequence
-section_patterns = OrderedDict([
-    ("Chief Complaint", r"(Chief Complaint:|Reason for Visit:|CC:|Presenting Complaint:)"),
-    ("HPI", r"(History of Present Illness:|HPI:|Present Illness:)"),
-    ("ROS", r"(Review of Systems:|ROS:|System Review:)"),
-    ("ED Vitals", r"(Triage Vitals:|Vital Signs:|VS:|Vitals:)"),
-    ("Physical Exam", r"(Physical Exam:|PE:|Exam Findings:)"),
-    ("Labs & Imaging", r"(Labs:|Laboratory Results:|Imaging Studies:|Diagnostics:)"),
-    ("MDM", r"(Medical Decision Making:|MDM:|Clinical Reasoning:)"),
-    ("Prior to Admission", r"(Past Medical History:|PMH:|Previous Admissions:)")
-])
+# Text area for inputting raw ED note data
+raw_text = st.text_area("Paste your raw ED note data here:")
 
-default_abbreviations = {
+# Hardcoded abbreviation mappings (term -> abbreviation or expanded form)
+abbreviations = {
     "myocardial infarction": "MI",
     "hypertension": "HTN",
-    # ... (keep existing default abbreviations)
+    "c/o": "complains of",
+    "SOB": "shortness of breath",
+    # Add more abbreviations or expansions as needed
 }
 
-if uploaded_file:
-    try:
-        user_abbreviations = json.load(uploaded_file)
-        # Merge with defaults (user abbreviations take precedence)
-        user_abbreviations = {**default_abbreviations, **user_abbreviations}
-    except Exception as e:
-        st.error(f"Invalid JSON file: {str(e)}")
-        user_abbreviations = default_abbreviations
-else:
-    user_abbreviations = default_abbreviations
+def classify_segment(segment: str) -> str:
+    """
+    Classify a text segment into an ED note section using keyword-based rules.
+    Returns the section label or "Uncategorized" if no rule matches.
+    """
+    text = segment.lower()
+    # Rule-based keywords for each section:
+    if any(kw in text for kw in ["chief complaint", "c/o", "complains of"]):
+        return "Chief Complaint"
+    if any(kw in text for kw in ["hpi", "history of present illness"]):
+        return "HPI"
+    if any(kw in text for kw in ["ros", "review of systems", "denies ", "reports no "]):
+        return "ROS"
+    if any(kw in text for kw in ["blood pressure", "bp", "heart rate", "hr", "o2 sat", "temperature", "vitals"]):
+        return "ED Vitals"
+    if any(kw in text for kw in ["physical exam", "exam", "heent", "lungs", "extremities", "no edema"]):
+        return "Physical Exam"
+    if any(kw in text for kw in ["lab", "labs", "wbc", "hgb", "x-ray", "ct scan", "mri", "imaging", "blood culture", "ekg"]):
+        return "Labs & Imaging"
+    if any(kw in text for kw in ["mdm", "medical decision", "plan", "assessment", "will monitor", "differential"]):
+        return "MDM"
+    if any(kw in text for kw in ["prior to admission", "pta", "before arrival", "prior treatment"]):
+        return "Prior to Admission"
+    return "Uncategorized"
 
-def format_ed_data(text, abbreviations):
-    if not text.strip():
+def split_text_into_segments(text: str) -> list:
+    """
+    Split the input text into segments (e.g., sentences or paragraphs) for classification.
+    """
+    # Split by sentence-ending punctuation (., ?, !) followed by whitespace
+    segments = re.split(r'(?<=[\.!?])\s+', text)
+    return [seg.strip() for seg in segments if seg.strip()]
+
+def format_ed_data(text: str, abbr_dict: dict) -> dict:
+    """
+    Format ED note data by classifying segments and replacing terms with abbreviations.
+    Returns a dictionary of section labels to formatted text.
+    """
+    if not text or not text.strip():
         return {"Error": "No data provided"}
 
-    structured_data = {section: "[Missing Data]" for section in section_patterns}
-    text = re.sub(r"\n+", "\n", text.strip())
-    remaining_text = text
-    processed_indices = []
+    # Initialize all sections with empty strings
+    structured_data = {section: "" for section in SECTION_LABELS}
 
-    # Process sections in order
-    for i, (section, pattern) in enumerate(section_patterns.items()):
-        matches = list(re.finditer(pattern, remaining_text, re.IGNORECASE))
-        if not matches:
-            continue
-            
-        # Use first match if multiple found
-        match = matches[0]
-        start = match.start()
-        end = match.end()
-        
-        # Find next section start
-        next_start = len(remaining_text)
-        for next_pattern in list(section_patterns.values())[i+1:]:
-            next_match = re.search(next_pattern, remaining_text[end:], re.IGNORECASE)
-            if next_match:
-                next_start = min(next_start, end + next_match.start())
-                break
-        
-        content = remaining_text[end:next_start].strip()
-        structured_data[section] = content
-        processed_indices.extend(range(start, next_start))
-        remaining_text = remaining_text[:start] + remaining_text[next_start:]
+    # Split the input text into meaningful segments
+    segments = split_text_into_segments(text)
 
-    # Handle unmatched content
-    unmatched = ""
-    for idx, char in enumerate(remaining_text):
-        if idx not in processed_indices:
-            unmatched += char
-    if unmatched.strip():
-        structured_data["Uncategorized"] = unmatched.strip()
+    # Classify each segment and append to the appropriate section
+    for segment in segments:
+        section = classify_segment(segment)
+        structured_data[section] += segment.strip() + "\n\n"
 
-    # Apply abbreviations (longest terms first)
-    for section in structured_data:
-        if section == "Error":
-            continue
-        content = structured_data[section]
-        for term in sorted(abbreviations.keys(), key=len, reverse=True):
-            content = re.sub(rf"(?i)\b{re.escape(term)}\b", abbreviations[term], content)
-        structured_data[section] = content
+    # Apply abbreviation replacements in each section's content
+    for section, content in structured_data.items():
+        for term, abbr in abbr_dict.items():
+            # Use case-insensitive replacement for whole words
+            content = re.sub(rf"(?i)\b{re.escape(term)}\b", abbr, content)
+        structured_data[section] = content.strip()  # Remove trailing newlines/spaces
 
     return structured_data
 
-def generate_pdf(text):
-    pdf = FPDF()
-    pdf.set_auto_page_break(auto=True, margin=15)
-    pdf.add_page()
-    pdf.set_font("Arial", size=12)
-
-    for section, content in text.items():
-        if section == "Uncategorized":
-            continue
-        pdf.set_font(style='B')
-        pdf.cell(0, 10, section, ln=True)
-        pdf.set_font(style='')
-        pdf.multi_cell(0, 8, content)
-        pdf.ln(5)
-    
-    pdf_output = BytesIO()
-    pdf.output(pdf_output)
-    return pdf_output.getvalue()
-
+# Process the data when the user clicks the format button
 if st.button("Format Data"):
-    structured_data = format_ed_data(raw_text, user_abbreviations)
-    
-    if "Error" in structured_data:
-        st.error(structured_data["Error"])
+    result = format_ed_data(raw_text, abbreviations)
+
+    if "Error" in result:
+        st.error(result["Error"])
     else:
         st.subheader("Structured ED Note")
-        editable_output = {}
-
-        # Add Uncategorized section if present
-        if "Uncategorized" in structured_data:
-            section_patterns["Uncategorized"] = "Uncategorized Content"
-
-        for section in section_patterns:
-            content = structured_data.get(section, "[Missing Data]")
-            key = f"edit_{section}"
-            if key not in st.session_state:
-                st.session_state[key] = content
-            editable_output[section] = st.text_area(
-                label=section,
-                value=st.session_state[key],
-                height=150 if section == "Uncategorized" else 100,
-                key=key
-            )
-
-        if st.button("Generate Final Report"):
-            final_output = OrderedDict()
-            for section in section_patterns:
-                if section == "Uncategorized" and not editable_output[section].strip():
-                    continue
-                final_output[section] = st.session_state[f'edit_{section}']
-            
-            # Create formatted text
-            formatted_text = "\n\n".join(
-                [f"**{section}**:\n{content}" for section, content in final_output.items()]
-            )
-            
-            st.markdown("### Final Report")
-            st.markdown(formatted_text)
-
-            # Download buttons
-            st.download_button(
-                "Download as Text",
-                formatted_text,
-                file_name="ed_note.txt"
-            )
-            
-            pdf_bytes = generate_pdf(final_output)
-            st.download_button(
-                "Download as PDF",
-                pdf_bytes,
-                file_name="ed_note.pdf",
-                mime="application/pdf"
-            )
+        # Display each section with its content as plain text
+        for section in SECTION_LABELS:
+            content = result.get(section, "")
+            if content:  # Only display sections that have content
+                st.markdown(f"**{section}:**")
+                st.write(content)
