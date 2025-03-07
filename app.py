@@ -1,6 +1,7 @@
 import re
 import json
 import streamlit as st
+from datetime import datetime
 
 # Updated section labels, including Medications
 SECTION_LABELS = [
@@ -23,7 +24,7 @@ section_to_soap = {
 }
 
 # Title of the Streamlit app
-st.title("ED Note Formatter - SOAP JSON Output")
+st.title("ED Note Formatter - Enhanced SOAP JSON Output")
 
 # Text area for inputting raw ED note data
 raw_text = st.text_area("Paste your raw ED note data here:")
@@ -102,13 +103,67 @@ def process_section_content(content: str):
     parts = [line.strip() for line in content.split("\n\n") if line.strip()]
     return parts if len(parts) > 1 else content.strip()
 
+def parse_medications(text: str) -> dict:
+    """
+    Parse the Medications section into subsections.
+    Looks for headings like "Continuous Infusions:", "Scheduled Meds:", and "PRN Meds:".
+    Returns a dictionary with lists of entries.
+    """
+    meds = {}
+    # Define possible subsections
+    subsections = ["Continuous Infusions:", "Scheduled Meds:", "PRN Meds:"]
+    for i, heading in enumerate(subsections):
+        if heading in text:
+            # Determine the text for this subsection
+            start = text.find(heading) + len(heading)
+            # Look for the next heading if available
+            end = len(text)
+            for other_heading in subsections[i+1:]:
+                pos = text.find(other_heading, start)
+                if pos != -1:
+                    end = pos
+                    break
+            subsection_text = text[start:end].strip()
+            # Split entries by double newline
+            meds[heading.replace(":", "")] = [entry.strip() for entry in subsection_text.split("\n\n") if entry.strip()]
+    return meds if meds else text
+
 def convert_to_soap(structured_data: dict) -> dict:
     """
     Convert the structured data into a nested SOAP JSON format.
+    Also includes a metadata block with a timestamp.
     """
     # Initialize the SOAP categories as empty dictionaries
     soap_data = {
         "Subjective": {},
         "Objective": {},
         "Assessment": {},
-  
+        "Plan": {},
+        "Other": {}
+    }
+    
+    for section, content in structured_data.items():
+        if content:  # Only include sections with content
+            soap_category = section_to_soap.get(section, "Other")
+            processed_content = process_section_content(content)
+            # Further process Medications section into subsections
+            if section == "Medications":
+                processed_content = parse_medications(content)
+            soap_data[soap_category][section] = processed_content
+    
+    # Add metadata
+    metadata = {
+        "generated_at": datetime.utcnow().isoformat() + "Z",
+        "note_version": "1.0"
+    }
+    return {"metadata": metadata, "note": soap_data}
+
+# Process and output the JSON when the user clicks the button
+if st.button("Format Data to Enhanced SOAP JSON"):
+    result = format_ed_data(raw_text, abbreviations)
+    if "Error" in result:
+        st.error(result["Error"])
+    else:
+        soap_result = convert_to_soap(result)
+        st.subheader("Structured ED Note (Enhanced SOAP Format)")
+        st.json(soap_result)
