@@ -109,4 +109,70 @@ def format_ed_data(text, abbreviations):
     return structured_data
 
 def generate_pdf(text):
-    "
+    """
+    Generate a PDF from the given text using FPDF.
+    """
+    pdf = FPDF()
+    pdf.add_page()
+    pdf.set_font("Arial", size=12)
+    for line in text.split("\n"):
+        pdf.multi_cell(0, 10, line)
+    return pdf.output(dest="S").encode("latin1")
+
+# ----------------------------
+# Main App Code
+# ----------------------------
+
+st.title("ED Note Formatter")
+
+# Input: Raw ED note text
+raw_text = st.text_area("Paste your raw ED data here:")
+
+# Input: Upload abbreviation JSON file (optional)
+uploaded_file = st.file_uploader("Upload an abbreviation JSON file (optional)", type=["json"])
+
+# Default abbreviation mapping
+default_abbreviations = {
+    "myocardial infarction": "MI",
+    "hypertension": "HTN",
+    "diabetes mellitus": "DM",
+    "chronic obstructive pulmonary disease": "COPD",
+    "cerebrovascular accident": "CVA",
+    "acute kidney injury": "AKI",
+    "deep vein thrombosis": "DVT",
+    "pulmonary embolism": "PE",
+    "chronic kidney disease": "CKD",
+    "gastroesophageal reflux disease": "GERD",
+    "atrial fibrillation": "AF",
+    "congestive heart failure": "CHF",
+    "coronary artery disease": "CAD"
+}
+
+# Use user-uploaded abbreviations if available
+if uploaded_file is not None:
+    user_abbreviations = load_abbreviations(uploaded_file, default_abbreviations)
+else:
+    user_abbreviations = default_abbreviations
+
+# Button to process the ED note data
+if st.button("Format Data"):
+    structured_data = format_ed_data(raw_text, user_abbreviations)
+    
+    if "Error" in structured_data:
+        st.error(structured_data["Error"])
+    else:
+        st.subheader("Live Editable Sections")
+        editable_output = {}
+        for section, content in structured_data.items():
+            editable_output[section] = st.text_area(section, content, height=100)
+        
+        if st.button("Save Edits"):
+            # Build formatted text using markdown for clarity
+            formatted_text = "\n\n".join([f"**{section}**:\n{content}" for section, content in editable_output.items()])
+            st.markdown("### Final Formatted Output")
+            st.markdown(formatted_text)
+            
+            # Provide download options
+            st.download_button("Download as Text", formatted_text, file_name="formatted_ed_note.txt", mime="text/plain")
+            pdf_bytes = generate_pdf(formatted_text)
+            st.download_button("Download as PDF", pdf_bytes, file_name="formatted_ed_note.pdf", mime="application/pdf")
