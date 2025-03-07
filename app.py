@@ -2,6 +2,10 @@ import json
 import re
 import streamlit as st
 from datetime import datetime
+import spacy  # For Named Entity Recognition (NER)
+
+# Load spaCy's English model for NER
+nlp = spacy.load("en_core_web_sm")
 
 # Updated section labels, including Medications
 SECTION_LABELS = [
@@ -37,6 +41,17 @@ abbreviations = {
     "SOB": "shortness of breath",
     # Add more abbreviations as needed
 }
+
+def remove_names(text: str) -> str:
+    """
+    Remove names from the text using spaCy's Named Entity Recognition (NER).
+    """
+    doc = nlp(text)
+    cleaned_text = []
+    for token in doc:
+        if token.ent_type_ != "PERSON":  # Filter out PERSON entities
+            cleaned_text.append(token.text)
+    return " ".join(cleaned_text)
 
 def classify_segment(segment: str) -> str:
     """
@@ -89,6 +104,9 @@ def format_ed_data(text: str, abbr_dict: dict) -> dict:
     """
     if not text or not text.strip():
         return {"Error": "No data provided"}
+
+    # Remove names from the text
+    text = remove_names(text)
 
     structured_data = {section: "" for section in SECTION_LABELS}
     segments = split_text_into_segments(text)
