@@ -63,11 +63,20 @@ def split_text_into_segments(text: str) -> list:
     """
     Split the input text into segments while avoiding incorrect splits on abbreviations.
     """
-    known_abbreviations = ["Dr.", "Mr.", "Mrs.", "Ms.", "Prof.", "Sr.", "Jr."]
-    
-    raw_segments = re.split(r'(?<!\b(?:' + '|'.join(map(re.escape, known_abbreviations)) + r'))(?<=[.!?])\s+', text)
-    
-    return [seg.strip() for seg in raw_segments if seg.strip()]
+    known_abbreviations = {"Dr.", "Mr.", "Mrs.", "Ms.", "Prof.", "Sr.", "Jr."}
+
+    # Split sentences based on punctuation
+    segments = re.split(r'(?<=[.!?])\s+', text)
+
+    # Rejoin segments that accidentally split abbreviations
+    fixed_segments = []
+    for seg in segments:
+        if fixed_segments and any(seg.startswith(abbr) for abbr in known_abbreviations):
+            fixed_segments[-1] += " " + seg  # Merge back with the previous sentence
+        else:
+            fixed_segments.append(seg)
+
+    return [s.strip() for s in fixed_segments if s.strip()]
 
 def format_ed_data(text: str, abbr_dict: dict) -> dict:
     """
