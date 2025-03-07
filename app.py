@@ -2,14 +2,28 @@ import re
 import json
 import streamlit as st
 
-# Pre-defined section labels for the ED note
+# Updated section labels, including Medications
 SECTION_LABELS = [
     "Chief Complaint", "HPI", "ROS", "ED Vitals", "Physical Exam",
-    "Labs & Imaging", "MDM", "Prior to Admission", "Uncategorized"
+    "Labs & Imaging", "Medications", "MDM", "Prior to Admission", "Uncategorized"
 ]
 
+# Mapping from original section to SOAP categories
+section_to_soap = {
+    "Chief Complaint": "Subjective",
+    "HPI": "Subjective",
+    "ROS": "Subjective",
+    "ED Vitals": "Objective",
+    "Physical Exam": "Objective",
+    "Labs & Imaging": "Objective",
+    "Medications": "Objective",
+    "MDM": "Assessment",
+    "Prior to Admission": "Plan",
+    "Uncategorized": "Other"
+}
+
 # Title of the Streamlit app
-st.title("ED Note Formatter - JSON Output")
+st.title("ED Note Formatter - SOAP JSON Output")
 
 # Text area for inputting raw ED note data
 raw_text = st.text_area("Paste your raw ED note data here:")
@@ -25,7 +39,7 @@ abbreviations = {
 
 def classify_segment(segment: str) -> str:
     """
-    Classify a text segment into an ED note section using simple rule-based keyword matching.
+    Classify a text segment into an ED note section using rule-based keyword matching.
     """
     text = segment.lower()
     if any(kw in text for kw in ["chief complaint", "c/o", "complains of"]):
@@ -38,9 +52,11 @@ def classify_segment(segment: str) -> str:
         return "ED Vitals"
     if any(kw in text for kw in ["physical exam", "exam", "heent", "lungs", "extremities", "no edema"]):
         return "Physical Exam"
-    if any(kw in text for kw in ["lab", "labs", "wbc", "hgb", "x-ray", "ct scan", "mri", "imaging", "blood culture", "ekg"]):
+    if any(kw in text for kw in ["lab", "labs", "wbc", "hgb", "x-ray", "ct scan", "mri", "imaging", "ekg"]):
         return "Labs & Imaging"
-    if any(kw in text for kw in ["mdm", "medical decision", "plan", "assessment", "will monitor", "differential"]):
+    if any(kw in text for kw in ["medications:", "infusion", "scheduled meds", "prn meds"]):
+        return "Medications"
+    if any(kw in text for kw in ["mdm", "medical decision", "plan", "assessment", "differential"]):
         return "MDM"
     if any(kw in text for kw in ["prior to admission", "pta", "before arrival", "prior treatment"]):
         return "Prior to Admission"
@@ -48,7 +64,7 @@ def classify_segment(segment: str) -> str:
 
 def split_text_into_segments(text: str) -> list:
     """
-    Split the input text into segments (e.g., sentences) for classification.
+    Split the input text into segments (e.g., sentences) based on punctuation.
     """
     segments = re.split(r'(?<=[\.!?])\s+', text)
     return [seg.strip() for seg in segments if seg.strip()]
@@ -56,15 +72,16 @@ def split_text_into_segments(text: str) -> list:
 def format_ed_data(text: str, abbr_dict: dict) -> dict:
     """
     Format ED note data by classifying segments and applying abbreviation replacements.
-    Returns the structured data as a dictionary.
+    Returns a dictionary with keys for each original section.
     """
     if not text or not text.strip():
         return {"Error": "No data provided"}
     
+    # Initialize all sections with empty strings
     structured_data = {section: "" for section in SECTION_LABELS}
     segments = split_text_into_segments(text)
     
-    # Classify each segment and assign to the appropriate section
+    # Classify each segment and append it to the appropriate section
     for segment in segments:
         section = classify_segment(segment)
         structured_data[section] += segment.strip() + "\n\n"
@@ -77,8 +94,21 @@ def format_ed_data(text: str, abbr_dict: dict) -> dict:
     
     return structured_data
 
-# When the user clicks the button, process and output the JSON
-if st.button("Format Data to JSON"):
-    result = format_ed_data(raw_text, abbreviations)
-    st.subheader("Structured ED Note as JSON")
-    st.json(result)
+def process_section_content(content: str):
+    """
+    If a section has multiple entries (separated by double newlines), split them into a list.
+    Otherwise, return the cleaned string.
+    """
+    parts = [line.strip() for line in content.split("\n\n") if line.strip()]
+    return parts if len(parts) > 1 else content.strip()
+
+def convert_to_soap(structured_data: dict) -> dict:
+    """
+    Convert the structured data into a nested SOAP JSON format.
+    """
+    # Initialize the SOAP categories as empty dictionaries
+    soap_data = {
+        "Subjective": {},
+        "Objective": {},
+        "Assessment": {},
+  
