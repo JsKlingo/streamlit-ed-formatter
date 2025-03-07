@@ -1,4 +1,5 @@
 import json
+import re
 import streamlit as st
 from datetime import datetime
 
@@ -61,6 +62,7 @@ def classify_segment(segment: str) -> str:
 def split_text_into_segments(text: str) -> list:
     """
     Split the input text into sentences without breaking abbreviations.
+    Uses word-based splitting instead of regex look-behind.
     """
     known_abbreviations = {"Dr.", "Mr.", "Mrs.", "Ms.", "Prof.", "Sr.", "Jr."}
     words = text.split()
@@ -70,10 +72,12 @@ def split_text_into_segments(text: str) -> list:
 
     for word in words:
         current_sentence.append(word)
+        # Check if word ends with sentence terminator and isn't an abbreviation
         if word.endswith((".", "!", "?")) and word not in known_abbreviations:
             segments.append(" ".join(current_sentence))
             current_sentence = []
 
+    # Add remaining words if any
     if current_sentence:
         segments.append(" ".join(current_sentence))
 
@@ -81,7 +85,7 @@ def split_text_into_segments(text: str) -> list:
 
 def format_ed_data(text: str, abbr_dict: dict) -> dict:
     """
-    Format ED note data by classifying segments and applying abbreviation replacements efficiently.
+    Format ED note data with improved abbreviation replacement using regex.
     """
     if not text or not text.strip():
         return {"Error": "No data provided"}
@@ -93,9 +97,13 @@ def format_ed_data(text: str, abbr_dict: dict) -> dict:
         section = classify_segment(segment)
         structured_data[section] += segment.strip() + "\n\n"
 
-    for section, content in structured_data.items():
+    # Case-insensitive whole-word replacement with regex
+    for section in structured_data:
+        content = structured_data[section]
         for term, abbr in abbr_dict.items():
-            structured_data[section] = structured_data[section].replace(term, abbr)
+            pattern = re.compile(rf'\b{re.escape(term)}\b', flags=re.IGNORECASE)
+            content = pattern.sub(abbr, content)
+        structured_data[section] = content.strip()
 
     return structured_data
 
@@ -112,7 +120,7 @@ def convert_to_soap(structured_data: dict) -> dict:
     }
     
     for section, content in structured_data.items():
-        if content.strip():  # Ensure we only include non-empty sections
+        if content.strip():
             soap_category = section_to_soap.get(section, "Other")
             soap_data[soap_category][section] = content.strip()
 
