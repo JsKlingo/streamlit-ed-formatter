@@ -1,4 +1,5 @@
 import re
+import json
 import streamlit as st
 
 # Pre-defined section labels for the ED note
@@ -8,27 +9,25 @@ SECTION_LABELS = [
 ]
 
 # Title of the Streamlit app
-st.title("ED Note Formatter")
+st.title("ED Note Formatter - JSON Output")
 
 # Text area for inputting raw ED note data
 raw_text = st.text_area("Paste your raw ED note data here:")
 
-# Hardcoded abbreviation mappings (term -> abbreviation or expanded form)
+# Hardcoded abbreviation mappings
 abbreviations = {
     "myocardial infarction": "MI",
     "hypertension": "HTN",
     "c/o": "complains of",
     "SOB": "shortness of breath",
-    # Add more abbreviations or expansions as needed
+    # Add more abbreviations as needed
 }
 
 def classify_segment(segment: str) -> str:
     """
-    Classify a text segment into an ED note section using keyword-based rules.
-    Returns the section label or "Uncategorized" if no rule matches.
+    Classify a text segment into an ED note section using simple rule-based keyword matching.
     """
     text = segment.lower()
-    # Rule-based keywords for each section:
     if any(kw in text for kw in ["chief complaint", "c/o", "complains of"]):
         return "Chief Complaint"
     if any(kw in text for kw in ["hpi", "history of present illness"]):
@@ -49,51 +48,37 @@ def classify_segment(segment: str) -> str:
 
 def split_text_into_segments(text: str) -> list:
     """
-    Split the input text into segments (e.g., sentences or paragraphs) for classification.
+    Split the input text into segments (e.g., sentences) for classification.
     """
-    # Split by sentence-ending punctuation (., ?, !) followed by whitespace
     segments = re.split(r'(?<=[\.!?])\s+', text)
     return [seg.strip() for seg in segments if seg.strip()]
 
 def format_ed_data(text: str, abbr_dict: dict) -> dict:
     """
-    Format ED note data by classifying segments and replacing terms with abbreviations.
-    Returns a dictionary of section labels to formatted text.
+    Format ED note data by classifying segments and applying abbreviation replacements.
+    Returns the structured data as a dictionary.
     """
     if not text or not text.strip():
         return {"Error": "No data provided"}
-
-    # Initialize all sections with empty strings
+    
     structured_data = {section: "" for section in SECTION_LABELS}
-
-    # Split the input text into meaningful segments
     segments = split_text_into_segments(text)
-
-    # Classify each segment and append to the appropriate section
+    
+    # Classify each segment and assign to the appropriate section
     for segment in segments:
         section = classify_segment(segment)
         structured_data[section] += segment.strip() + "\n\n"
-
-    # Apply abbreviation replacements in each section's content
+    
+    # Apply abbreviation replacements for consistency
     for section, content in structured_data.items():
         for term, abbr in abbr_dict.items():
-            # Use case-insensitive replacement for whole words
             content = re.sub(rf"(?i)\b{re.escape(term)}\b", abbr, content)
-        structured_data[section] = content.strip()  # Remove trailing newlines/spaces
-
+        structured_data[section] = content.strip()
+    
     return structured_data
 
-# Process the data when the user clicks the format button
-if st.button("Format Data"):
+# When the user clicks the button, process and output the JSON
+if st.button("Format Data to JSON"):
     result = format_ed_data(raw_text, abbreviations)
-
-    if "Error" in result:
-        st.error(result["Error"])
-    else:
-        st.subheader("Structured ED Note")
-        # Display each section with its content as plain text
-        for section in SECTION_LABELS:
-            content = result.get(section, "")
-            if content:  # Only display sections that have content
-                st.markdown(f"**{section}:**")
-                st.write(content)
+    st.subheader("Structured ED Note as JSON")
+    st.json(result)
