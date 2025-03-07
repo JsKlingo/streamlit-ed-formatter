@@ -26,11 +26,12 @@ def parse_sections(text, section_patterns):
     """
     Parse the raw text into structured sections using a combined regex pattern.
     """
-    # Create a combined regex with named groups (spaces replaced by underscores)
+    # Create a combined regex with named groups.
     group_names = {}
     combined_parts = []
     for section, pattern in section_patterns.items():
-        valid_group = section.replace(" ", "_")
+        # Convert section name into a valid regex group name by replacing non-word characters with underscores.
+        valid_group = re.sub(r'\W', '_', section)
         group_names[valid_group] = section
         combined_parts.append(f"(?P<{valid_group}>{pattern})")
     combined_pattern = re.compile("|".join(combined_parts), re.IGNORECASE)
