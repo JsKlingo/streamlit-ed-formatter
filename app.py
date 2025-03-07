@@ -1,16 +1,20 @@
 import json
 import re
 import streamlit as st
-from datetime import datetime
+from datetime import datetime, timezone
 import spacy  # For Named Entity Recognition (NER)
 
-# Load spaCy's English model for NER
-try:
-    nlp = spacy.load("en_core_web_sm")
-except OSError:
-    st.warning("Downloading 'en_core_web_sm' model... This may take a few minutes.")
-    spacy.cli.download("en_core_web_sm")
-    nlp = spacy.load("en_core_web_sm")
+# Load spaCy's English model for NER with caching to avoid repeated downloads
+@st.cache_resource
+def load_spacy_model():
+    try:
+        return spacy.load("en_core_web_sm")
+    except OSError:
+        st.warning("Downloading 'en_core_web_sm' model... This may take a few minutes.")
+        spacy.cli.download("en_core_web_sm")
+        return spacy.load("en_core_web_sm")
+
+nlp = load_spacy_model()
 
 # Updated section labels, including Medications
 SECTION_LABELS = [
@@ -86,75 +90,56 @@ def split_text_into_segments(text: str) -> list:
     """
     known_abbreviations = {"Dr.", "Mr.", "Mrs.", "Ms.", "Prof.", "Sr.", "Jr."}
     words = text.split()
-    
     segments = []
     current_sentence = []
-
     for word in words:
         current_sentence.append(word)
-        # Check if word ends with sentence terminator and isn't an abbreviation
+        # End segment at sentence-ending punctuation if not an abbreviation
         if word.endswith((".", "!", "?")) and word not in known_abbreviations:
             segments.append(" ".join(current_sentence))
             current_sentence = []
-
-    # Add remaining words if any
     if current_sentence:
         segments.append(" ".join(current_sentence))
-
     return [s.strip() for s in segments if s.strip()]
 
 def format_ed_data(text: str, abbr_dict: dict) -> dict:
     """
-    Format ED note data with improved abbreviation replacement using regex.
+    Format ED note data with abbreviation replacement.
     """
     if not text or not text.strip():
         return {"Error": "No data provided"}
-
-    # Remove names from the text
+    # Remove personal names using NER
     text = remove_names(text)
-
     structured_data = {section: "" for section in SECTION_LABELS}
+    # Split text into sentence segments
     segments = split_text_into_segments(text)
-    
     for segment in segments:
         section = classify_segment(segment)
         structured_data[section] += segment.strip() + "\n\n"
-
-    # Case-insensitive whole-word replacement with regex
-    for section in structured_data:
-        content = structured_data[section]
+    # Replace full terms with abbreviations (case-insensitive whole-word matches)
+    for section, content in structured_data.items():
         for term, abbr in abbr_dict.items():
             pattern = re.compile(rf'\b{re.escape(term)}\b', flags=re.IGNORECASE)
             content = pattern.sub(abbr, content)
         structured_data[section] = content.strip()
-
     return structured_data
 
 def convert_to_soap(structured_data: dict) -> dict:
     """
-    Convert the structured data into a nested JSON format optimized for GPT-based H&P generation.
+    Convert the structured data into a nested JSON (SOAP format) for output.
     """
-    soap_data = {
-        "Subjective": {},
-        "Objective": {},
-        "Assessment": {},
-        "Plan": {},
-        "Other": {}
-    }
-    
+    soap_data = {"Subjective": {}, "Objective": {}, "Assessment": {}, "Plan": {}, "Other": {}}
     for section, content in structured_data.items():
         if content.strip():
             soap_category = section_to_soap.get(section, "Other")
             soap_data[soap_category][section] = content.strip()
-
     metadata = {
-        "generated_at": datetime.utcnow().isoformat() + "Z",
+        "generated_at": datetime.now(timezone.utc).isoformat().replace("+00:00", "Z"),
         "note_version": "1.1"
     }
-    
     return {"metadata": metadata, "note": soap_data}
 
-# Process and output the JSON when the user clicks the button
+# Run processing when button is clicked
 if st.button("Format Data to Enhanced SOAP JSON"):
     result = format_ed_data(raw_text, abbreviations)
     if "Error" in result:
