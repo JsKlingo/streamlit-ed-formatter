@@ -1,4 +1,3 @@
-import re
 import json
 import streamlit as st
 from datetime import datetime
@@ -44,34 +43,34 @@ def classify_segment(segment: str) -> str:
     """
     text = segment.lower()
     keyword_map = {
-        "Chief Complaint": [r"\bchief complaint\b", r"\bc/o\b", r"\bcomplains of\b"],
-        "HPI": [r"\bhpi\b", r"\bhistory of present illness\b"],
-        "ROS": [r"\bros\b", r"\breview of systems\b", r"\bdenies\b", r"\breports no\b"],
-        "ED Vitals": [r"\bblood pressure\b", r"\bbp\b", r"\bheart rate\b", r"\bhr\b", r"\bo2 sat\b", r"\btemperature\b", r"\bvitals\b"],
-        "Physical Exam": [r"\bphysical exam\b", r"\bexam\b", r"\bheent\b", r"\blungs\b", r"\bextremities\b", r"\bno edema\b"],
-        "Labs & Imaging": [r"\blab\b", r"\blabs\b", r"\bwbc\b", r"\bhgb\b", r"\bx-ray\b", r"\bct scan\b", r"\bmri\b", r"\bimaging\b", r"\bekg\b"],
-        "Medications": [r"\bmedications?:\b", r"\binfusion\b", r"\bscheduled meds\b", r"\bprn meds\b"],
-        "MDM": [r"\bmdm\b", r"\bmedical decision\b", r"\bplan\b", r"\bassessment\b", r"\bdifferential\b"],
-        "Prior to Admission": [r"\bprior to admission\b", r"\bpta\b", r"\bbefore arrival\b", r"\bprior treatment\b"]
+        "Chief Complaint": ["chief complaint", "c/o", "complains of"],
+        "HPI": ["hpi", "history of present illness"],
+        "ROS": ["ros", "review of systems", "denies", "reports no"],
+        "ED Vitals": ["blood pressure", "bp", "heart rate", "hr", "o2 sat", "temperature", "vitals"],
+        "Physical Exam": ["physical exam", "exam", "heent", "lungs", "extremities", "no edema"],
+        "Labs & Imaging": ["lab", "labs", "wbc", "hgb", "x-ray", "ct scan", "mri", "imaging", "ekg"],
+        "Medications": ["medications:", "infusion", "scheduled meds", "prn meds"],
+        "MDM": ["mdm", "medical decision", "plan", "assessment", "differential"],
+        "Prior to Admission": ["prior to admission", "pta", "before arrival", "prior treatment"]
     }
-    for section, patterns in keyword_map.items():
-        if any(re.search(pattern, text) for pattern in patterns):
+    for section, keywords in keyword_map.items():
+        if any(keyword in text for keyword in keywords):
             return section
     return "Uncategorized"
 
 def split_text_into_segments(text: str) -> list:
     """
-    Split the input text into segments while avoiding incorrect splits on abbreviations.
+    Split the input text into sentences without breaking abbreviations.
     """
     known_abbreviations = {"Dr.", "Mr.", "Mrs.", "Ms.", "Prof.", "Sr.", "Jr."}
-
-    # Manually split sentences using `.`, `!`, `?`, while keeping abbreviations intact
+    words = text.split()
+    
     segments = []
     current_sentence = []
-    
-    for word in text.split():
+
+    for word in words:
         current_sentence.append(word)
-        if word.endswith(('.', '!', '?')) and word not in known_abbreviations:
+        if word.endswith((".", "!", "?")) and word not in known_abbreviations:
             segments.append(" ".join(current_sentence))
             current_sentence = []
 
@@ -94,10 +93,9 @@ def format_ed_data(text: str, abbr_dict: dict) -> dict:
         section = classify_segment(segment)
         structured_data[section] += segment.strip() + "\n\n"
 
-    pattern = re.compile(r'\b(' + '|'.join(map(re.escape, abbr_dict.keys())) + r')\b', re.IGNORECASE)
-    
     for section, content in structured_data.items():
-        structured_data[section] = pattern.sub(lambda match: abbr_dict[match.group(0).lower()], content).strip()
+        for term, abbr in abbr_dict.items():
+            structured_data[section] = structured_data[section].replace(term, abbr)
 
     return structured_data
 
@@ -114,7 +112,7 @@ def convert_to_soap(structured_data: dict) -> dict:
     }
     
     for section, content in structured_data.items():
-        if content:
+        if content.strip():  # Ensure we only include non-empty sections
             soap_category = section_to_soap.get(section, "Other")
             soap_data[soap_category][section] = content.strip()
 
